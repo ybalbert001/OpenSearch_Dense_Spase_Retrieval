@@ -1,6 +1,6 @@
 import json
 import boto3
-import requests 
+import requests
 from requests_aws4auth import AWS4Auth
 import argparse
 from opensearchpy import OpenSearch, RequestsHttpConnection, AWSV4SignerAuth, helpers
@@ -362,16 +362,22 @@ if __name__ == '__main__':
 
     response1 = register_and_deploy_aos_model(aos_client, model_name='cohere multilingual doc', model_group_id=model_group_id, description="embed-multilingual-v3 for doc", connecter_id=cohere_doc_emb_connector_id)
     response2 = register_and_deploy_aos_model(aos_client, model_name='cohere multilingual query', model_group_id=model_group_id, description="embed-multilingual-v3 for query", connecter_id=cohere_query_emb_connector_id)
-    
+
     print("response1:")
     print(response1)
     print("response2:")
     print(response2)
 
-    dense_model_id = response1['model_id']
-    print(f"dense_model_id:{dense_model_id}")
+    doc_dense_model_id = response1['model_id']
+    print(f"doc_dense_model_id:{doc_dense_model_id}")
+    query_dense_model_id = response2['model_id']
+    print(f"query_dense_model_id:{query_dense_model_id}")
 
     # pipeline = neural-sparse-pipeline
-    response = create_ingest_pipeline(aos_client, sparse_model_id, dense_model_id)
+    response = create_ingest_pipeline(aos_client, sparse_model_id, doc_dense_model_id)
     print("create_ingest_pipeline:")
+    print(response)
+
+    response = create_query_pipeline(aos_client, sparse_model_id, query_dense_model_id)
+    print("create_query_pipeline:")
     print(response)
