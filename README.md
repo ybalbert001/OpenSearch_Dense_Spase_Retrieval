@@ -1,6 +1,6 @@
 1. Setup dense and sparse hybird retrieval experiment environment
 	- setup OpenSearch Domain
-	  *please refer AWS's documentation*
+	  <br>*please refer AWS's documentation*
 
 	- setup sparse model
    
