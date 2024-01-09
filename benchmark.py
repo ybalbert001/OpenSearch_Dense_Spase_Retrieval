@@ -1,22 +1,51 @@
-from search_func import search_by_bm25, search_by_dense, search_by_sparse, search_by_dense_sparse, search_by_dense_bm25
-from setup_model_and_pipeline import get_aos_client
-from datasets import load_dataset
 import time
 import argparse
-import json
+from tqdm import tqdm
+from datasets import load_dataset
+from setup_model_and_pipeline import get_aos_client
 
-def ingest_data(aos_client, index_name, content):    
-    request_body = {
-        "content": content
-    }
+def deduplicate_dataset(dataset):
+    context_list = [row["context"] for row in dataset]
+    context_set = set(context_list)
+    return list(context_set)
 
-    response = aos_client.transport.perform_request(
-        method="POST",
-        url=f"/{index_name}/_doc",
-        body=json.dumps(request_body)
-    )
+def build_bulk_body(index_name,sources_list):
+    bulk_body = []
+    for source in sources_list:
+        bulk_body.append({ "index" : { "_index" : index_name} })
+        bulk_body.append(source)
+    return bulk_body
 
-    return response
+def ingest_dataset(dataset,aos_client,index_name, bulk_size=50):
+    print("Deduplicating dataset...")
+    context_list = deduplicate_dataset(dataset)
+    # 19029 for train, 1204 for validation
+    print(f"Finished deduplication. Total number of passages: {len(context_list)}")
+    
+    for start_idx in tqdm(range(0,len(context_list),bulk_size)):
+        contexts = context_list[start_idx:start_idx+bulk_size]
+        response = aos_client.bulk(
+            build_bulk_body(index_name, [{"content":context} for context in contexts]),
+            # set a large timeout because a new sparse encoding endpoint need warm up
+            request_timeout=100
+        )
+        assert response["errors"]==False
+    
+    aos_client.indices.refresh(index=index_name,request_timeout=100)
+    
+def calculate_recall_rate(dataset, index_name, aos_client, data_size, query_body_lambda, recall_k=4):
+    hit_cnt = 0
+    miss_cnt = 0
+    for idx, item in tqdm(enumerate(dataset.select(range(data_size)))):
+        query = item['question']
+        content = item['context']
+        response = aos_client.search(index=index_name,size=recall_k, body=query_body_lambda(query))
+        docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
+        if content in docs:
+            hit_cnt += 1
+        else:
+            miss_cnt += 1
+    print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{recall_k}:{hit_cnt/data_size}")
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -28,6 +57,7 @@ if __name__ == '__main__':
     parser.add_argument('--dense_model_id', type=str, default='', help='dense_model_id')
     parser.add_argument('--sparse_model_id', type=str, default='', help='sparse_model_id')
     parser.add_argument("--ingest", action="store_true", help="is ingest or search")
+    parser.add_argument("--query_dataset_type", type=str, default='validation', help='use validation set or train set to query')
     args = parser.parse_args()
     aos_endpoint = args.aos_endpoint
     aos_domain = '-'.join(aos_endpoint.split('-')[1:3])
@@ -37,6 +67,7 @@ if __name__ == '__main__':
     topk = args.topk
     dense_model_id = args.dense_model_id
     sparse_model_id = args.sparse_model_id
+    query_dataset_type = args.query_dataset_type
 
     dataset_name = "squad_v2"
     dataset = load_dataset(dataset_name)
@@ -45,109 +76,130 @@ if __name__ == '__main__':
 
     if ingest is True:
         start = time.time()
-        for idx, item in enumerate(dataset["train"].select(range(testset_size))):
-            try:
-                response = ingest_data(aos_client, index_name, item['context'][:2000])
-                if idx % 50 == 0:
-                    print(f"{idx}-th ingested.")
-            except Exception as e:
-                print(e)
-                print(item['context'])
+        ingest_dataset(dataset=dataset["train"],aos_client=aos_client,index_name=index_name)
+        ingest_dataset(dataset=dataset["validation"],aos_client=aos_client,index_name=index_name)
         elpase_time = time.time() - start
         throughput = float(testset_size)/elpase_time
         print(f"[ingest] throughput/s:{throughput}")
     else:
-        hit_cnt = 0
-        miss_cnt = 0
-        start = time.time()
-        for idx, item in enumerate(dataset["train"].select(range(testset_size))):
-            query = item['question']
-            content = item['context']
-            if idx % 50 == 0:
-                print(f"{idx}-th searched.")
-            results = search_by_bm25(aos_client, index_name, query, topk)
-            if content in results:
-                hit_cnt += 1
-            else:
-                miss_cnt += 1
-
-        recall_k = float(hit_cnt)/testset_size
-        elpase_time = time.time() - start
-        throughput = float(testset_size)/elpase_time
-        print(f"[search_by_bm25] hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}: {recall_k}, throughput/s:{throughput}")
-
-        hit_cnt = 0
-        miss_cnt = 0
-        start = time.time()
-        for idx, item in enumerate(dataset["train"].select(range(testset_size))):
-            query = item['question']
-            content = item['context']
-            if idx % 50 == 0:
-                print(f"{idx}-th searched.")
-            results = search_by_dense(aos_client, index_name, query, dense_model_id, topk)
-            if content in results:
-                hit_cnt += 1
-            else:
-                miss_cnt += 1
-
-        recall_k = float(hit_cnt)/testset_size
-        elpase_time = time.time() - start
-        throughput = float(testset_size)/elpase_time
-        print(f"[search_by_dense] hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}: {recall_k}, throughput/s:{throughput}")
-
-        hit_cnt = 0
-        miss_cnt = 0
-        start = time.time()
-        for idx, item in enumerate(dataset["train"].select(range(testset_size))):
-            query = item['question']
-            content = item['context']
-            if idx % 50 == 0:
-                print(f"{idx}-th searched.")
-            results = search_by_sparse(aos_client, index_name, query, sparse_model_id, topk)
-            if content in results:
-                hit_cnt += 1
-            else:
-                miss_cnt += 1
-
-        recall_k = float(hit_cnt)/testset_size
-        elpase_time = time.time() - start
-        throughput = float(testset_size)/elpase_time
-        print(f"[search_by_sparse] hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}: {recall_k}, throughput/s:{throughput}")
-
-        hit_cnt = 0
-        miss_cnt = 0
-        start = time.time()
-        for idx, item in enumerate(dataset["train"].select(range(testset_size))):
-            query = item['question']
-            content = item['context']
-            if idx % 50 == 0:
-                print(f"{idx}-th searched.")
-            results = search_by_dense_sparse(aos_client, index_name, query, sparse_model_id, dense_model_id, topk)
-            if content in results:
-                hit_cnt += 1
-            else:
-                miss_cnt += 1
-
-        recall_k = float(hit_cnt)/testset_size
-        elpase_time = time.time() - start
-        throughput = float(testset_size)/elpase_time
-        print(f"[search_by_dense_sparse] hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}: {recall_k}, throughput/s:{throughput}")
-
-        hit_cnt = 0
-        miss_cnt = 0
-        start = time.time()
-        for idx, item in enumerate(dataset["train"].select(range(testset_size))):
-            query = item['question']
-            content = item['context']
-            if idx % 50 == 0:
-                print(f"{idx}-th searched.")
-            results = search_by_dense_bm25(aos_client, index_name, query, dense_model_id, topk)
-            if content in results:
-                hit_cnt += 1
-            else:
-                miss_cnt += 1
-
-        recall_k = float(hit_cnt)/testset_size
-        elpase_time = time.time() - start
-        throughput = float(testset_size)/elpase_time
-        print(f"[search_by_dense_bm25] hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}: {recall_k}, throughput/s:{throughput}")
+        print("start search by bm25")
+        calculate_recall_rate(
+            dataset = dataset[query_dataset_type],
+            index_name = index_name,
+            aos_client = aos_client,
+            data_size = testset_size,
+            query_body_lambda = lambda query_text: {
+                "query": {
+                    "match": {
+                        "content" : query_text
+                    }
+                }
+            },
+            recall_k=topk
+        )
+        
+        print("start search by dense")
+        calculate_recall_rate(
+            dataset = dataset[query_dataset_type],
+            index_name = index_name,
+            aos_client = aos_client,
+            data_size = testset_size,
+            query_body_lambda = lambda query_text: {
+                "query": {
+                    "neural": {
+                        "dense_embedding": {
+                        "query_text": query_text,
+                        "model_id": dense_model_id,
+                        "k": topk
+                        }
+                    }
+                }
+            },
+            recall_k=topk
+        )
+        
+        print("start search by sparse")
+        calculate_recall_rate(
+            dataset = dataset[query_dataset_type],
+            index_name = index_name,
+            aos_client = aos_client,
+            data_size = testset_size,
+            query_body_lambda = lambda query_text: {
+                "query": {
+                    "neural_sparse": {
+                    "sparse_embedding": {
+                        "query_text": query_text,
+                        "model_id": sparse_model_id,
+                        "max_token_score": 3.5
+                    }
+                }
+                }
+            },
+            recall_k=topk
+        )
+        
+        print("start search by dense-sparse")
+        calculate_recall_rate(
+            dataset = dataset[query_dataset_type],
+            index_name = index_name,
+            aos_client = aos_client,
+            data_size = testset_size,
+            query_body_lambda = lambda query_text: {
+                "query": {
+                    "hybrid": {
+                        "queries": [
+                            {
+                                "neural_sparse": {
+                                    "sparse_embedding": {
+                                        "query_text": query_text,
+                                        "model_id": sparse_model_id,
+                                        "max_token_score": 3.5
+                                    }
+                                }
+                            },
+                            {
+                                "neural": {
+                                    "dense_embedding": {
+                                        "query_text": query_text,
+                                        "model_id": dense_model_id,
+                                        "k": 10
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            },
+            recall_k=topk
+        )
+        
+        print("start search by dense-bm25")
+        calculate_recall_rate(
+            dataset = dataset[query_dataset_type],
+            index_name = index_name,
+            aos_client = aos_client,
+            data_size = testset_size,
+            query_body_lambda = lambda query_text: {
+                "query": {
+                    "hybrid": {
+                        "queries": [
+                            {
+                                "match": {
+                                    "content" : query_text
+                                }
+                            },
+                            {
+                                "neural": {
+                                    "dense_embedding": {
+                                        "query_text": query_text,
+                                        "model_id": dense_model_id,
+                                        "k": 10
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            },
+            recall_k=topk
+        )

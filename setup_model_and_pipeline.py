@@ -253,13 +253,10 @@ def create_index(aos_client, index_name="aos-retrieval"):
                     "dimension": 1024,
                     "method": {
                         "name": "hnsw",
-                        "space_type": "cosinesimil",
                         "engine": "nmslib",
-                        "parameters": {
-                            "ef_construction": 512,
-                            "m": 32
-                        }
-                    }            
+                        "space_type": "innerproduct",
+                        "parameters": {}
+                    }
                 },
                 "sparse_embedding": {
                     "type": "rank_features"
