@@ -16,8 +16,8 @@ def search_by_bm25(aos_client, index_name, query, topk=4):
         body=json.dumps(request_body)
     )
 
-    docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
-    return docs
+    # docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
+    return response["hits"]["hits"]
 
 def search_by_dense(aos_client, index_name, query, dense_model_id, topk=4):
     request_body = {
@@ -38,8 +38,8 @@ def search_by_dense(aos_client, index_name, query, dense_model_id, topk=4):
         body=json.dumps(request_body)
     )
 
-    docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
-    return docs
+    # docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
+    return response["hits"]["hits"]
 
 def search_by_sparse(aos_client, index_name, query, sparse_model_id, topk=4):
     request_body = {
@@ -61,8 +61,8 @@ def search_by_sparse(aos_client, index_name, query, sparse_model_id, topk=4):
         body=json.dumps(request_body)
     )
 
-    docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
-    return docs
+    # docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
+    return response["hits"]["hits"]
 
 def search_by_dense_sparse(aos_client, index_name, query, sparse_model_id, dense_model_id, topk=4):
     request_body = {
@@ -99,8 +99,8 @@ def search_by_dense_sparse(aos_client, index_name, query, sparse_model_id, dense
         body=json.dumps(request_body)
     )
 
-    docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
-    return docs
+    # docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
+    return response["hits"]["hits"]
 
 def search_by_dense_bm25(aos_client, index_name, query, dense_model_id, topk=4):
     request_body = {
@@ -135,5 +135,5 @@ def search_by_dense_bm25(aos_client, index_name, query, dense_model_id, topk=4):
         body=json.dumps(request_body)
     )
 
-    docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
-    return docs
+    # docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
+    return response["hits"]["hits"]
