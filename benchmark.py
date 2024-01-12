@@ -3,6 +3,8 @@ import argparse
 from tqdm import tqdm
 from datasets import load_dataset
 from setup_model_and_pipeline import get_aos_client
+from search_func import search_by_bm25, search_by_dense, search_by_sparse, search_by_dense_sparse, search_by_dense_bm25
+from datasets import load_dataset
 
 def deduplicate_dataset(dataset):
     context_list = [row["context"] for row in dataset]
@@ -40,6 +42,7 @@ def calculate_recall_rate(dataset, index_name, aos_client, data_size, query_body
         query = item['question']
         content = item['context']
         response = aos_client.search(index=index_name,size=recall_k, body=query_body_lambda(query))
+        response = search_by_dense_sparse(aos_client, index_name, query, sparse_model_id, dense_model_id, topk=4)
         docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
         if content in docs:
             hit_cnt += 1
@@ -82,124 +85,73 @@ if __name__ == '__main__':
         throughput = float(testset_size)/elpase_time
         print(f"[ingest] throughput/s:{throughput}")
     else:
+        dataset = dataset[query_dataset_type]
         print("start search by bm25")
-        calculate_recall_rate(
-            dataset = dataset[query_dataset_type],
-            index_name = index_name,
-            aos_client = aos_client,
-            data_size = testset_size,
-            query_body_lambda = lambda query_text: {
-                "query": {
-                    "match": {
-                        "content" : query_text
-                    }
-                }
-            },
-            recall_k=topk
-        )
-        
+        hit_cnt = 0
+        miss_cnt = 0
+        for idx, item in tqdm(enumerate(dataset.select(range(testset_size)))):
+            query = item['question']
+            content = item['context']
+            response = search_by_bm25(aos_client, index_name, query, topk)
+            results = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
+            if content in results:
+                hit_cnt += 1
+            else:
+                miss_cnt += 1
+        print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}:{hit_cnt/(hit_cnt+miss_cnt)}")
+
         print("start search by dense")
-        calculate_recall_rate(
-            dataset = dataset[query_dataset_type],
-            index_name = index_name,
-            aos_client = aos_client,
-            data_size = testset_size,
-            query_body_lambda = lambda query_text: {
-                "query": {
-                    "neural": {
-                        "dense_embedding": {
-                        "query_text": query_text,
-                        "model_id": dense_model_id,
-                        "k": topk
-                        }
-                    }
-                }
-            },
-            recall_k=topk
-        )
-        
+        hit_cnt = 0
+        miss_cnt = 0
+        for idx, item in tqdm(enumerate(dataset.select(range(testset_size)))):
+            query = item['question']
+            content = item['context']
+            response = search_by_dense(aos_client, index_name, query, dense_model_id, topk)
+            results = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
+            if content in results:
+                hit_cnt += 1
+            else:
+                miss_cnt += 1
+        print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}:{hit_cnt/(hit_cnt+miss_cnt)}")
+
         print("start search by sparse")
-        calculate_recall_rate(
-            dataset = dataset[query_dataset_type],
-            index_name = index_name,
-            aos_client = aos_client,
-            data_size = testset_size,
-            query_body_lambda = lambda query_text: {
-                "query": {
-                    "neural_sparse": {
-                    "sparse_embedding": {
-                        "query_text": query_text,
-                        "model_id": sparse_model_id,
-                        "max_token_score": 3.5
-                    }
-                }
-                }
-            },
-            recall_k=topk
-        )
-        
+        hit_cnt = 0
+        miss_cnt = 0
+        for idx, item in tqdm(enumerate(dataset.select(range(testset_size)))):
+            query = item['question']
+            content = item['context']
+            response = search_by_sparse(aos_client, index_name, query, sparse_model_id, topk)
+            results = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
+            if content in results:
+                hit_cnt += 1
+            else:
+                miss_cnt += 1
+        print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}:{hit_cnt/(hit_cnt+miss_cnt)}")
+
         print("start search by dense-sparse")
-        calculate_recall_rate(
-            dataset = dataset[query_dataset_type],
-            index_name = index_name,
-            aos_client = aos_client,
-            data_size = testset_size,
-            query_body_lambda = lambda query_text: {
-                "query": {
-                    "hybrid": {
-                        "queries": [
-                            {
-                                "neural_sparse": {
-                                    "sparse_embedding": {
-                                        "query_text": query_text,
-                                        "model_id": sparse_model_id,
-                                        "max_token_score": 3.5
-                                    }
-                                }
-                            },
-                            {
-                                "neural": {
-                                    "dense_embedding": {
-                                        "query_text": query_text,
-                                        "model_id": dense_model_id,
-                                        "k": 10
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                }
-            },
-            recall_k=topk
-        )
-        
+        hit_cnt = 0
+        miss_cnt = 0
+        for idx, item in tqdm(enumerate(dataset.select(range(testset_size)))):
+            query = item['question']
+            content = item['context']
+            response = search_by_dense_sparse(aos_client, index_name, query, sparse_model_id, dense_model_id, topk)
+            results = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
+            if content in results:
+                hit_cnt += 1
+            else:
+                miss_cnt += 1
+        print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}:{hit_cnt/(hit_cnt+miss_cnt)}")
+
         print("start search by dense-bm25")
-        calculate_recall_rate(
-            dataset = dataset[query_dataset_type],
-            index_name = index_name,
-            aos_client = aos_client,
-            data_size = testset_size,
-            query_body_lambda = lambda query_text: {
-                "query": {
-                    "hybrid": {
-                        "queries": [
-                            {
-                                "match": {
-                                    "content" : query_text
-                                }
-                            },
-                            {
-                                "neural": {
-                                    "dense_embedding": {
-                                        "query_text": query_text,
-                                        "model_id": dense_model_id,
-                                        "k": 10
-                                    }
-                                }
-                            }
-                        ]
-                    }
-                }
-            },
-            recall_k=topk
-        )
+        hit_cnt = 0
+        miss_cnt = 0
+        for idx, item in tqdm(enumerate(dataset.select(range(testset_size)))):
+            query = item['question']
+            content = item['context']
+            response = search_by_dense_bm25(aos_client, index_name, query, dense_model_id, topk)
+            results = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
+            if content in results:
+                hit_cnt += 1
+            else:
+                miss_cnt += 1
+        print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}:{hit_cnt/(hit_cnt+miss_cnt)}")
