@@ -27,11 +27,21 @@
 	   2. query_dense_model_id, which is for search
 	
 2. Experiment Procedure
-   - ingest test data
-      ```shell
-      python3 benchmark.py --aos_endpoint <aos_endpoint> --testset_size 3000 --index_name <index_name> --topk 4 --dense_model_id <dense_model_id> --sparse_model_id <sparse_model_id> --ingest
-      ```
-   - search benchmarking
-      ```shell
-      python3 benchmark.py --aos_endpoint <aos_endpoint> --testset_size 3000 --index_name <index_name> --topk 4 --dense_model_id <dense_model_id> --sparse_model_id <sparse_model_id>
-      ```
+   - For Beir dataset
+   	- ingest test data
+	      ```shell
+	      python3 benchmark-beir.py --aos_endpoint <aos_endpoint> --testset_size 3000 --index_name <index_name> --topk 20 --dense_model_id <dense_model_id> --sparse_model_id <sparse_model_id> --ingest
+	      ```
+	   - search benchmarking
+	      ```shell
+	      python3 benchmark-beir.py --aos_endpoint <aos_endpoint> --testset_size 3000 --index_name <index_name> --topk 20 --dense_model_id <dense_model_id> --sparse_model_id <sparse_model_id>
+	      ```
+	- For other dataset
+   	- ingest test data
+	      ```shell
+	      python3 benchmark.py --aos_endpoint <aos_endpoint> --testset_size 3000 --index_name <index_name> --topk 20 --dense_model_id <dense_model_id> --sparse_model_id <sparse_model_id> --query_dataset_type "train" --ingest
+	      ```
+	   - search benchmarking
+	      ```shell
+	      python3 benchmark.py --aos_endpoint <aos_endpoint> --testset_size 3000 --index_name <index_name> --topk 20 --dense_model_id <dense_model_id> --sparse_model_id <sparse_model_id> --query_dataset_type "train"
+	      ```

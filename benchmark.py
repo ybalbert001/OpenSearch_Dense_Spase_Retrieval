@@ -23,7 +23,7 @@ def ingest_dataset(dataset,aos_client,index_name, bulk_size=50):
     context_list = deduplicate_dataset(dataset)
     # 19029 for train, 1204 for validation
     print(f"Finished deduplication. Total number of passages: {len(context_list)}")
-    
+
     for start_idx in tqdm(range(0,len(context_list),bulk_size)):
         contexts = context_list[start_idx:start_idx+bulk_size]
         response = aos_client.bulk(
@@ -32,23 +32,24 @@ def ingest_dataset(dataset,aos_client,index_name, bulk_size=50):
             request_timeout=100
         )
         assert response["errors"]==False
-    
+
     aos_client.indices.refresh(index=index_name,request_timeout=100)
-    
-def calculate_recall_rate(dataset, index_name, aos_client, data_size, query_body_lambda, recall_k=4):
-    hit_cnt = 0
-    miss_cnt = 0
-    for idx, item in tqdm(enumerate(dataset.select(range(data_size)))):
-        query = item['question']
-        content = item['context']
-        response = aos_client.search(index=index_name,size=recall_k, body=query_body_lambda(query))
-        response = search_by_dense_sparse(aos_client, index_name, query, sparse_model_id, dense_model_id, topk=4)
-        docs = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
-        if content in docs:
-            hit_cnt += 1
-        else:
-            miss_cnt += 1
-    print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{recall_k}:{hit_cnt/data_size}")
+
+def calc_recall(metric, answer, results):
+    if answer in results[:1]:
+        metric['hit_1'] += 1
+    else:
+        metric['miss_1'] += 1
+
+    if answer in results[:4]:
+        metric['hit_4'] += 1
+    else:
+        metric['miss_4'] += 1
+
+    if answer in results[:10]:
+        metric['hit_10'] += 1
+    else:
+        metric['miss_10'] += 1
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -61,6 +62,7 @@ if __name__ == '__main__':
     parser.add_argument('--sparse_model_id', type=str, default='', help='sparse_model_id')
     parser.add_argument("--ingest", action="store_true", help="is ingest or search")
     parser.add_argument("--query_dataset_type", type=str, default='validation', help='use validation set or train set to query')
+    parser.add_argument("--dataset_name", type=str, default='squad_v2', help='specify the dataset')
     args = parser.parse_args()
     aos_endpoint = args.aos_endpoint
     aos_domain = '-'.join(aos_endpoint.split('-')[1:3])
@@ -72,7 +74,7 @@ if __name__ == '__main__':
     sparse_model_id = args.sparse_model_id
     query_dataset_type = args.query_dataset_type
 
-    dataset_name = "squad_v2"
+    dataset_name = args.dataset_name
     dataset = load_dataset(dataset_name)
 
     aos_client = get_aos_client(aos_endpoint)
@@ -87,71 +89,101 @@ if __name__ == '__main__':
     else:
         dataset = dataset[query_dataset_type]
         print("start search by bm25")
-        hit_cnt = 0
-        miss_cnt = 0
+        metric = {
+            "hit_1" : 0,
+            "miss_1" : 0,
+            "hit_4" : 0,
+            "miss_4" : 0,
+            "hit_10" : 0,
+            "miss_10" : 0
+        }
         for idx, item in tqdm(enumerate(dataset.select(range(testset_size)))):
             query = item['question']
             content = item['context']
             response = search_by_bm25(aos_client, index_name, query, topk)
-            results = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
-            if content in results:
-                hit_cnt += 1
-            else:
-                miss_cnt += 1
-        print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}:{hit_cnt/(hit_cnt+miss_cnt)}")
+            results = [hit["_source"]['content'] for hit in response ]
+            calc_recall(metric, content, results)
+
+        print(f"hit_1:{metric['hit_1']}, miss_1:{metric['miss_1']}, recall@1:{metric['hit_1']/(metric['hit_1']+metric['miss_1'])}")
+        print(f"hit_4:{metric['hit_4']}, miss_1:{metric['miss_4']}, recall@4:{metric['hit_4']/(metric['hit_4']+metric['miss_4'])}")
+        print(f"hit_10:{metric['hit_10']}, miss_10:{metric['miss_10']}, recall@10:{metric['hit_10']/(metric['hit_10']+metric['miss_10'])}")
 
         print("start search by dense")
-        hit_cnt = 0
-        miss_cnt = 0
+        metric = {
+            "hit_1" : 0,
+            "miss_1" : 0,
+            "hit_4" : 0,
+            "miss_4" : 0,
+            "hit_10" : 0,
+            "miss_10" : 0
+        }
         for idx, item in tqdm(enumerate(dataset.select(range(testset_size)))):
             query = item['question']
             content = item['context']
             response = search_by_dense(aos_client, index_name, query, dense_model_id, topk)
-            results = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
-            if content in results:
-                hit_cnt += 1
-            else:
-                miss_cnt += 1
-        print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}:{hit_cnt/(hit_cnt+miss_cnt)}")
+            results = [hit["_source"]['content'] for hit in response ]
+            calc_recall(metric, content, results)
+
+        print(f"hit_1:{metric['hit_1']}, miss_1:{metric['miss_1']}, recall@1:{metric['hit_1']/(metric['hit_1']+metric['miss_1'])}")
+        print(f"hit_4:{metric['hit_4']}, miss_1:{metric['miss_4']}, recall@4:{metric['hit_4']/(metric['hit_4']+metric['miss_4'])}")
+        print(f"hit_10:{metric['hit_10']}, miss_10:{metric['miss_10']}, recall@10:{metric['hit_10']/(metric['hit_10']+metric['miss_10'])}")
 
         print("start search by sparse")
-        hit_cnt = 0
-        miss_cnt = 0
+        metric = {
+            "hit_1" : 0,
+            "miss_1" : 0,
+            "hit_4" : 0,
+            "miss_4" : 0,
+            "hit_10" : 0,
+            "miss_10" : 0
+        }
         for idx, item in tqdm(enumerate(dataset.select(range(testset_size)))):
             query = item['question']
             content = item['context']
             response = search_by_sparse(aos_client, index_name, query, sparse_model_id, topk)
-            results = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
-            if content in results:
-                hit_cnt += 1
-            else:
-                miss_cnt += 1
-        print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}:{hit_cnt/(hit_cnt+miss_cnt)}")
+            results = [hit["_source"]['content'] for hit in response ]
+            calc_recall(metric, content, results)
+
+        print(f"hit_1:{metric['hit_1']}, miss_1:{metric['miss_1']}, recall@1:{metric['hit_1']/(metric['hit_1']+metric['miss_1'])}")
+        print(f"hit_4:{metric['hit_4']}, miss_1:{metric['miss_4']}, recall@4:{metric['hit_4']/(metric['hit_4']+metric['miss_4'])}")
+        print(f"hit_10:{metric['hit_10']}, miss_10:{metric['miss_10']}, recall@10:{metric['hit_10']/(metric['hit_10']+metric['miss_10'])}")
 
         print("start search by dense-sparse")
-        hit_cnt = 0
-        miss_cnt = 0
+        metric = {
+            "hit_1" : 0,
+            "miss_1" : 0,
+            "hit_4" : 0,
+            "miss_4" : 0,
+            "hit_10" : 0,
+            "miss_10" : 0
+        }
         for idx, item in tqdm(enumerate(dataset.select(range(testset_size)))):
             query = item['question']
             content = item['context']
             response = search_by_dense_sparse(aos_client, index_name, query, sparse_model_id, dense_model_id, topk)
-            results = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
-            if content in results:
-                hit_cnt += 1
-            else:
-                miss_cnt += 1
-        print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}:{hit_cnt/(hit_cnt+miss_cnt)}")
+            results = [hit["_source"]['content'] for hit in response ]
+            calc_recall(metric, content, results)
+
+        print(f"hit_1:{metric['hit_1']}, miss_1:{metric['miss_1']}, recall@1:{metric['hit_1']/(metric['hit_1']+metric['miss_1'])}")
+        print(f"hit_4:{metric['hit_4']}, miss_1:{metric['miss_4']}, recall@4:{metric['hit_4']/(metric['hit_4']+metric['miss_4'])}")
+        print(f"hit_10:{metric['hit_10']}, miss_10:{metric['miss_10']}, recall@10:{metric['hit_10']/(metric['hit_10']+metric['miss_10'])}")
 
         print("start search by dense-bm25")
-        hit_cnt = 0
-        miss_cnt = 0
+        metric = {
+            "hit_1" : 0,
+            "miss_1" : 0,
+            "hit_4" : 0,
+            "miss_4" : 0,
+            "hit_10" : 0,
+            "miss_10" : 0
+        }
         for idx, item in tqdm(enumerate(dataset.select(range(testset_size)))):
             query = item['question']
             content = item['context']
             response = search_by_dense_bm25(aos_client, index_name, query, dense_model_id, topk)
-            results = [hit["_source"]['content'] for hit in response["hits"]["hits"]]
-            if content in results:
-                hit_cnt += 1
-            else:
-                miss_cnt += 1
-        print(f"hit:{hit_cnt}, miss:{miss_cnt}, recall@{topk}:{hit_cnt/(hit_cnt+miss_cnt)}")
+            results = [hit["_source"]['content'] for hit in response ]
+            calc_recall(metric, content, results)
+
+        print(f"hit_1:{metric['hit_1']}, miss_1:{metric['miss_1']}, recall@1:{metric['hit_1']/(metric['hit_1']+metric['miss_1'])}")
+        print(f"hit_4:{metric['hit_4']}, miss_1:{metric['miss_4']}, recall@4:{metric['hit_4']/(metric['hit_4']+metric['miss_4'])}")
+        print(f"hit_10:{metric['hit_10']}, miss_10:{metric['miss_10']}, recall@10:{metric['hit_10']/(metric['hit_10']+metric['miss_10'])}")
